@@ -1,5 +1,5 @@
 {
-  "tarot":      { "igUserId": "1784...", "token": "env:IG_TOKEN_TAROT" },
-  "constellize":{ "igUserId": "1784...", "token": "env:IG_TOKEN_CONSTELLIZE" },
-  "personal":   { "igUserId": "1784...", "token": "env:IG_TOKEN_PERSONAL" }
+  "brand-a":  { "igUserId": "17841400000000001", "token": "env:IG_TOKEN_BRAND_A" },
+  "brand-b":  { "igUserId": "17841400000000002", "token": "env:IG_TOKEN_BRAND_B" },
+  "personal": { "igUserId": "17841400000000003", "token": "env:IG_TOKEN_PERSONAL" }
 }
