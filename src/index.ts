@@ -2,13 +2,41 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 const G = "https://graph.instagram.com/v21.0";
 type Acct = { igUserId: string; token: string };
 const accounts: Record<string, Acct> = JSON.parse(
-  readFileSync(process.env.IG_ACCOUNTS_FILE ?? "accounts.json", "utf8"));
-const tok = (a: Acct) => a.token.startsWith("env:") ? process.env[a.token.slice(4)]! : a.token;
+  readFileSync(resolve(process.env.IG_ACCOUNTS_FILE ?? "accounts.json"), "utf8"));
+const accountsFile = resolve(process.env.IG_ACCOUNTS_FILE ?? "accounts.json");
+const cacheFile = resolve(process.env.IG_TOKEN_CACHE ?? join(dirname(accountsFile), "tokens.json"));
+type Cached = { token: string; expiresAt?: number; refreshedAt: number };
+const cache: Record<string, Cached> = existsSync(cacheFile) ? JSON.parse(readFileSync(cacheFile, "utf8")) : {};
+const saveCache = () => writeFileSync(cacheFile, JSON.stringify(cache, null, 2), { mode: 0o600 });
+const configured = (a: Acct) => a.token.startsWith("env:") ? process.env[a.token.slice(4)] : a.token;
+const nameOf = (a: Acct) => Object.keys(accounts).find(k => accounts[k] === a)!;
+const tok = (a: Acct) => {
+  const t = cache[nameOf(a)]?.token ?? configured(a);
+  if (!t) throw new Error(`No token for account ${nameOf(a)}`);
+  return t;
+};
+
+const DAY = 86_400_000;
+const REFRESH_WINDOW = Number(process.env.IG_REFRESH_DAYS_BEFORE ?? 10) * DAY;
+async function refreshOne(name: string, force = false) {
+  const a = accounts[name], c = cache[name];
+  if (!force && c?.expiresAt && c.expiresAt - Date.now() > REFRESH_WINDOW) return { name, skipped: "not due", expiresAt: new Date(c.expiresAt).toISOString() };
+  if (!force && c && Date.now() - c.refreshedAt < DAY) return { name, skipped: "refreshed <24h ago" };
+  const u = new URL("https://graph.instagram.com/refresh_access_token");
+  u.search = new URLSearchParams({ grant_type: "ig_refresh_token", access_token: tok(a) }).toString();
+  const j: any = await (await fetch(u)).json();
+  if (j.error) return { name, error: j.error.message };
+  cache[name] = { token: j.access_token, expiresAt: Date.now() + j.expires_in * 1000, refreshedAt: Date.now() };
+  saveCache();
+  return { name, refreshed: true, expiresAt: new Date(cache[name].expiresAt!).toISOString() };
+}
+const refreshAll = (force = false) => Promise.all(Object.keys(accounts).map(n => refreshOne(n, force).catch(e => ({ name: n, error: String(e) }))));
 const acct = (n: string) => { const a = accounts[n]; if (!a) throw new Error(`Unknown account ${n}; have ${Object.keys(accounts)}`); return a; };
 
 async function api(a: Acct, path: string, params: Record<string, string> = {}, method = "POST") {
@@ -82,7 +110,20 @@ s.tool("reply_dm", "Reply to a user who messaged the account (within 24h window 
   async ({ account: n, recipientId, text }) => { const a = acct(n);
     return ok(await api(a, `${a.igUserId}/messages`, { recipient: JSON.stringify({ id: recipientId }), message: JSON.stringify({ text }) })); });
 
+s.tool("refresh_tokens", "Refresh long-lived tokens now (all accounts or one) and show expiry",
+  { account: z.string().optional(), force: z.boolean().default(false) },
+  async ({ account: n, force }) => ok(n ? [await refreshOne(acct(n) && n, force)] : await refreshAll(force)));
+
+s.tool("token_status", "Show token expiry per account", {}, async () =>
+  ok(Object.keys(accounts).map(n => ({ name: n, source: cache[n] ? "cache" : "config",
+    expiresAt: cache[n]?.expiresAt ? new Date(cache[n].expiresAt!).toISOString() : "unknown (not yet refreshed)" }))));
+
 s.tool("create_highlight", "Not supported by Instagram API", { account },
   async () => ok({ error: "Instagram's API has no highlights endpoint. Add the story to a highlight in the app." }));
+
+if (process.env.IG_REFRESH_ONLY) { console.log(JSON.stringify(await refreshAll(), null, 2)); process.exit(0); }
+refreshAll().then(r => console.error("[ig-mcp] token refresh:", JSON.stringify(r)));
+setInterval(() => refreshAll().then(r => console.error("[ig-mcp] token refresh:", JSON.stringify(r))),
+  Number(process.env.IG_REFRESH_CHECK_HOURS ?? 12) * 3_600_000).unref();
 
 await s.connect(new StdioServerTransport());

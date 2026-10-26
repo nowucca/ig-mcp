@@ -1,4 +1,4 @@
 {"name":"instagram-mcp","version":"0.1.0","type":"module","bin":{"instagram-mcp":"dist/index.js"},
-"scripts":{"build":"tsc","start":"node dist/index.js"},
+"scripts":{"build":"tsc","start":"node dist/index.js","refresh":"node dist/refresh.js"},
 "dependencies":{"@modelcontextprotocol/sdk":"^1.0.0","zod":"^3.23.0"},
 "devDependencies":{"typescript":"^5.5.0","@types/node":"^20.0.0"}}
