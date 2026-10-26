@@ -1,0 +1,5 @@
+{
+  "tarot":      { "igUserId": "1784...", "token": "env:IG_TOKEN_TAROT" },
+  "constellize":{ "igUserId": "1784...", "token": "env:IG_TOKEN_CONSTELLIZE" },
+  "personal":   { "igUserId": "1784...", "token": "env:IG_TOKEN_PERSONAL" }
+}
